@@ -26,7 +26,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-BERLIN = ZoneInfo("Europe/Berlin")  # der Cloud-Rechner läuft in UTC, angezeigt wird deutsche Zeit
+try:
+    BERLIN = ZoneInfo("Europe/Berlin")  # der Cloud-Rechner läuft in UTC, angezeigt wird deutsche Zeit
+except Exception:  # Windows ohne Paket tzdata: dann die Zeitzone des Rechners nehmen (hier ohnehin Berlin)
+    BERLIN = datetime.now().astimezone().tzinfo
 
 try:
     from dotenv import load_dotenv
@@ -52,6 +55,7 @@ MIN_GEWINN = 500        # Silber je Stück
 MIN_MARGE = 0.15
 MAX_MARGE = 2.00        # darüber ist es fast immer eine einzelne Ausreißer-Order, nicht handelbar
 LUX_MARGE = 0.20
+FLIP_SPERRE = {"ROCK", "STONEBLOCK"}   # Stein hat kaum Umsatz, die Preise sind fast immer Ausreißer
 
 STADT_NAME = {v: k for k, v in ab.CITIES.items()}
 STADT_KURZ = {"Lymhurst": "Lymhurst", "Fort Sterling": "Fort Sterling", "Martlock": "Martlock",
@@ -127,10 +131,18 @@ def preise_holen(ids):
     return out
 
 
+def gruppe_von(item_id):
+    """T4_ORE_LEVEL2@2 -> ORE, T4_MAIN_SWORD -> MAIN_SWORD"""
+    teile = item_id.partition("@")[0].split("_")
+    return "_".join(teile[1:]).replace("_LEVEL", "").rstrip("0123456789") or teile[0]
+
+
 def flips(preise, info, n=5):
     kandidaten = []
     for iid, staedte in preise.items():
         if iid not in info or info[iid][1] == "lux":
+            continue
+        if info[iid][1] == "res" and gruppe_von(iid) in FLIP_SPERRE:
             continue
         verkauf = {s: e["sell"] for s, e in staedte.items() if "sell" in e}
         if len(verkauf) < 2:
@@ -140,12 +152,20 @@ def flips(preise, info, n=5):
         gewinn = pb * (1 - STEUER) - pa
         marge = gewinn / pa if pa else 0
         if gewinn >= MIN_GEWINN and MIN_MARGE <= marge <= MAX_MARGE:
-            kandidaten.append((marge, gewinn, info[iid][0], a, pa, b, pb))
+            kandidaten.append((gewinn, marge, info[iid][0], a, pa, b, pb, gruppe_von(iid)))
+    # Nach Silber-Gewinn je Stück sortieren (nicht nach Marge, sonst gewinnen Nischenwaren mit
+    # einzelnen Ausreißer-Orders) und höchstens ein Eintrag je Rohstoffgruppe, damit die Liste
+    # nicht fünfmal dieselbe Ware in verschiedenen Stufen zeigt.
     kandidaten.sort(reverse=True)
-    zeilen = []
-    for marge, gewinn, name, a, pa, b, pb in kandidaten[:n]:
+    zeilen, gesehen = [], set()
+    for gewinn, marge, name, a, pa, b, pb, gruppe in kandidaten:
+        if gruppe in gesehen:
+            continue
+        gesehen.add(gruppe)
         zeilen.append(f"**{name}** · {STADT_KURZ[a]} {silber(pa)} → {STADT_KURZ[b]} {silber(pb)} "
                       f"· **+{silber(gewinn)}** ({marge*100:.0f} %)")
+        if len(zeilen) >= n:
+            break
     return zeilen or ["Keine Flips mit mindestens 15 % Marge und frischen Preisen."]
 
 
@@ -198,11 +218,11 @@ def embed_bauen(preise, info, alle):
     anz_frisch = sum(1 for st in preise.values() for e in st.values() if "sell" in e)
     return {
         "title": "📊 Marktbuch · Europe",
-        "description": f"Stand **{jetzt:%d.%m. %H:%M}** · günstigste Verkaufsorder je Stadt · "
+        "description": f"Stand **{jetzt:%d.%m. %H:%M} Uhr** · günstigste Verkaufsorder je Stadt · "
                        f"{anz_frisch} frische Preise (< 8 h)" + (" · alle Kategorien" if alle else ""),
         "color": 0xE8B923,
         "fields": [
-            {"name": "🔁 Top-Flips (Kaufen → Verkaufen, nach 6,5 % Steuer)", "value": kuerzen(flips(preise, info))},
+            {"name": "🔁 Top-Flips je Stück (Kaufen → Verkaufen, nach 6,5 % Steuer, sortiert nach Gewinn)", "value": kuerzen(flips(preise, info))},
             {"name": "🏷️ Günstigste Stadt je Rohstoff", "value": kuerzen(guenstigste(preise, info))},
             {"name": "💎 Luxuswaren-Alarm (Markt → fester Händlerpreis)", "value": kuerzen(luxus(preise, info))},
         ],
