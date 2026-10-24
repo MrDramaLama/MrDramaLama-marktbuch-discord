@@ -24,6 +24,9 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+BERLIN = ZoneInfo("Europe/Berlin")  # der Cloud-Rechner läuft in UTC, angezeigt wird deutsche Zeit
 
 try:
     from dotenv import load_dotenv
@@ -61,7 +64,7 @@ ROHSTOFF = {"FIBER": "Fasern", "HIDE": "Häute", "WOOD": "Holz", "ORE": "Erz", "
 
 
 def log(text):
-    zeile = f"{datetime.now():%Y-%m-%d %H:%M:%S}  {text}"
+    zeile = f"{datetime.now(BERLIN):%Y-%m-%d %H:%M:%S}  {text}"
     print(zeile)
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(zeile + "\n")
@@ -191,7 +194,7 @@ def kuerzen(zeilen, grenze=1000):
 
 
 def embed_bauen(preise, info, alle):
-    jetzt = datetime.now()
+    jetzt = datetime.now(BERLIN)
     anz_frisch = sum(1 for st in preise.values() for e in st.values() if "sell" in e)
     return {
         "title": "📊 Marktbuch · Europe",
