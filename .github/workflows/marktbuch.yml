@@ -2,7 +2,8 @@ name: Marktbuch Discord
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # alle 30 Minuten (UTC), GitHub verschiebt bei Last um einige Minuten
+    - cron: "7,37 * * * *"   # alle 30 Minuten (UTC), zur Minute 7 und 37: zur vollen und halben Stunde
+                             # sind GitHubs Warteschlangen voll, dann verschiebt sich der Lauf um 20-60 Minuten
   workflow_dispatch:         # Knopf "Run workflow" für einen Lauf von Hand
 
 permissions:
