@@ -14,3 +14,9 @@ T4-T6, Luxuswaren-Alarm (Markt unter festem Händlerpreis). Quelle: Albion Onlin
 
 Dateien: `marktbuch_discord.py` (Poster), `marktbuch_abruf.py` (Warenliste, Anfragen),
 `marktbuch_waren.json` (Waren), `.github/workflows/marktbuch.yml` (Zeitplan).
+
+## Datenpaket fürs Marktbuch-Artefakt
+Jeder Lauf baut zusätzlich `artefakt.json` (alle Preise als Artefakt-Dokumente plus Verlaufspunkte der letzten
+drei Stunden) und legt sie ohne Verlauf auf dem Branch `daten` ab:
+https://raw.githubusercontent.com/MrDramaLama/marktbuch-discord/daten/artefakt.json
+Eine Claude-Cloud-Routine lädt diese Datei stündlich und schreibt sie ins Marktbuch-Artefakt.

@@ -32,6 +32,21 @@ jobs:
         # Lauf der Minute 7 (und Handstart) postet neu, Lauf der Minute 37 bearbeitet
         run: python marktbuch_discord.py ${{ github.event.schedule != '37 * * * *' && '--neu' || '' }}
 
+      - name: Datenpaket fürs Marktbuch-Artefakt bauen
+        env:
+          TZ: Europe/Berlin
+        run: python artefakt_bundle.py /tmp/artefakt
+
+      - name: Datenpaket auf Branch "daten" ablegen (ohne Verlauf, wird jedes Mal ersetzt)
+        run: |
+          cd /tmp/artefakt
+          git init -q -b daten
+          git config user.name "marktbuch-bot"
+          git config user.email "marktbuch-bot@users.noreply.github.com"
+          git add artefakt.json
+          git commit -q -m "Datenpaket $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" daten
+
       - name: Nachricht-ID im Repo sichern
         run: |
           git config user.name "marktbuch-bot"
