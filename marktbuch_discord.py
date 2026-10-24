@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 Marktbuch für Discord: holt Preise vom Albion Online Data Project (Europa) und pflegt eine
-Live-Nachricht per Webhook in #markt-und-handel. Die Nachricht wird bei jedem Lauf bearbeitet,
-nicht neu gepostet, damit der Kanal nicht zugespamt wird.
+Live-Nachricht per Webhook in #markt-und-handel. Zur Minute 7 jeder Stunde kommt ein neuer Post
+(der vorherige wird gelöscht, damit immer nur der aktuelle unten im Kanal steht), zur Minute 37
+wird dieser Post mit frischen Preisen bearbeitet.
 
     python marktbuch_discord.py            Rohstoffe T2-T8 (mit Verzauberung) und Luxuswaren
     python marktbuch_discord.py --alle     zusätzlich alle Kategorien aus marktbuch_waren.json (langsam)
-    python marktbuch_discord.py --neu      Nachricht neu posten statt bearbeiten
+    python marktbuch_discord.py --neu      neuen Post absetzen und den vorherigen löschen (stündlich)
 
 Inhalt der Nachricht:
   🔁 Top-Flips:              günstigste Verkaufsorder in Stadt A kaufen, in Stadt B per Verkaufsorder
@@ -226,8 +227,8 @@ def embed_bauen(preise, info, alle):
             {"name": "🏷️ Günstigste Stadt je Rohstoff", "value": kuerzen(guenstigste(preise, info))},
             {"name": "💎 Luxuswaren-Alarm (Markt → fester Händlerpreis)", "value": kuerzen(luxus(preise, info))},
         ],
-        "footer": {"text": "Quelle: Albion Online Data Project · aktualisiert alle 30 Minuten · "
-                           "Preise sind Momentaufnahmen, vor dem Kauf im Spiel prüfen"},
+        "footer": {"text": "Quelle: Albion Online Data Project · neuer Post jede Stunde, Zwischenstand zur "
+                           "halben Stunde · Preise sind Momentaufnahmen, vor dem Kauf im Spiel prüfen"},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -250,9 +251,18 @@ def senden(embed, neu):
             log("Alte Nachricht nicht mehr da, poste neu.")
     req = urllib.request.Request(WEBHOOK + "?wait=true", method="POST", headers=H, data=body)
     with urllib.request.urlopen(req, timeout=30) as r:
-        mid = json.load(r)["id"]
-    STATE.write_text(json.dumps({"message_id": mid}), "utf-8")
-    return "neu gepostet", mid
+        neue_id = json.load(r)["id"]
+    STATE.write_text(json.dumps({"message_id": neue_id}), "utf-8")
+    if mid and mid != neue_id:
+        # Erst posten, dann den alten Post löschen: so steht nie gar keine Nachricht im Kanal.
+        req = urllib.request.Request(f"{WEBHOOK}/messages/{mid}", method="DELETE", headers=H)
+        try:
+            with urllib.request.urlopen(req, timeout=30):
+                pass
+        except urllib.error.HTTPError as err:
+            if err.code != 404:
+                log(f"Alten Post {mid} nicht gelöscht: HTTP {err.code}")
+    return "neu gepostet", neue_id
 
 
 def main():

@@ -1,7 +1,8 @@
 # Marktbuch Discord (Cloud)
 
-Postet alle 30 Minuten eine Live-Nachricht mit Albion-Marktdaten (Europa) in den Discord-Kanal
-`#markt-und-handel` der Gilde Drama Lama United. Läuft als GitHub-Actions-Zeitplan, unabhängig vom eigenen PC.
+Postet jede Stunde (Minute 7 UTC) einen neuen Post mit Albion-Marktdaten (Europa) in den Discord-Kanal
+`#markt-und-handel` der Gilde Drama Lama United und löscht den vorherigen; zur Minute 37 wird der Post mit
+frischen Preisen bearbeitet. Läuft als GitHub-Actions-Zeitplan, unabhängig vom eigenen PC.
 
 Inhalt: Top-5-Flips zwischen den fünf Königsstädten (nach 6,5 % Steuer), günstigste Stadt je Rohstoff
 T4-T6, Luxuswaren-Alarm (Markt unter festem Händlerpreis). Quelle: Albion Online Data Project.

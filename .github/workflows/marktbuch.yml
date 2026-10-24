@@ -2,8 +2,9 @@ name: Marktbuch Discord
 
 on:
   schedule:
-    - cron: "7,37 * * * *"   # alle 30 Minuten (UTC), zur Minute 7 und 37: zur vollen und halben Stunde
-                             # sind GitHubs Warteschlangen voll, dann verschiebt sich der Lauf um 20-60 Minuten
+    - cron: "7 * * * *"      # Minute 7 (UTC): neuer Post, der vorherige wird gelöscht
+    - cron: "37 * * * *"     # Minute 37 (UTC): denselben Post mit frischen Preisen bearbeiten
+                             # (nicht :00/:30: da sind GitHubs Warteschlangen voll, Läufe verschieben sich oder fallen aus)
   workflow_dispatch:         # Knopf "Run workflow" für einen Lauf von Hand
 
 permissions:
@@ -28,11 +29,15 @@ jobs:
         env:
           MARKTBUCH_WEBHOOK: ${{ secrets.MARKTBUCH_WEBHOOK }}
           PYTHONIOENCODING: utf-8
-        run: python marktbuch_discord.py
+        # Lauf der Minute 7 (und Handstart) postet neu, Lauf der Minute 37 bearbeitet
+        run: python marktbuch_discord.py ${{ github.event.schedule != '37 * * * *' && '--neu' || '' }}
 
       - name: Nachricht-ID im Repo sichern
         run: |
           git config user.name "marktbuch-bot"
           git config user.email "marktbuch-bot@users.noreply.github.com"
           git add marktbuch_discord_state.json
-          git diff --cached --quiet || git commit -m "State: Nachricht-ID aktualisiert" && git push
+          git diff --cached --quiet && exit 0
+          git commit -m "State: Nachricht-ID aktualisiert"
+          git pull --rebase origin main   # falls inzwischen von Hand gepusht wurde
+          git push
