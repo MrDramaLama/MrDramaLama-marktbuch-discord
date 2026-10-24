@@ -1,0 +1,37 @@
+name: Marktbuch Discord
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # alle 30 Minuten (UTC), GitHub verschiebt bei Last um einige Minuten
+  workflow_dispatch:         # Knopf "Run workflow" für einen Lauf von Hand
+
+permissions:
+  contents: write            # damit der Lauf die Nachricht-ID (State) zurück ins Repo schreiben darf
+
+concurrency:
+  group: marktbuch
+  cancel-in-progress: false
+
+jobs:
+  posten:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Marktbuch posten
+        env:
+          MARKTBUCH_WEBHOOK: ${{ secrets.MARKTBUCH_WEBHOOK }}
+          PYTHONIOENCODING: utf-8
+        run: python marktbuch_discord.py
+
+      - name: Nachricht-ID im Repo sichern
+        run: |
+          git config user.name "marktbuch-bot"
+          git config user.email "marktbuch-bot@users.noreply.github.com"
+          git add marktbuch_discord_state.json
+          git diff --cached --quiet || git commit -m "State: Nachricht-ID aktualisiert" && git push
