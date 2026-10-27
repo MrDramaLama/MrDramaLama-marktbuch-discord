@@ -8,8 +8,10 @@ EINE Datei artefakt.json, die eine Cloud-Routine von GitHub lädt und per Artifa
 Inhalt von artefakt.json:
   ts     Zeit des Abrufs (ISO, Berliner Zeit)
   docs   {"markt/ly": {...}, ..., "meta/abruf": {...}}   56 Dokumente, so wie sie ins Artefakt gehören
-  hist   [{"doc_id": "dp-...", "data": {...}}, ...]       Verlaufspunkte der letzten 3 Stunden; die Routine
-                                                          schreibt nur die, die jünger als meta/abruf.ts im Artefakt sind
+  verlauf {"CLOTH~20261027": {...}, ...}                 Verlauf der letzten 3 Stunden je Warengruppe und Tag (UTC),
+                                                          Datenschema 2; die Routine ergänzt bestehende Docs per update
+                                                          und legt neue per set an (derselbe Punkt darf doppelt kommen)
+  hist   []                                               leer, nur damit eine Routine mit altem Auftrag nicht abbricht
 """
 import json
 import os
@@ -37,19 +39,19 @@ def main(ziel):
             ab.main(str(dump), str(out), "", "")
         finally:
             sys.stdout.close(); sys.stdout = alt_stdout
-        docs, hist = {}, []
+        docs, verlauf = {}, {}
         for f in sorted(out.glob("*.json")):
             coll, _, doc_id = f.stem.partition("__")
             data = json.loads(f.read_text("utf-8"))
-            if coll == "obs":
-                hist.append({"doc_id": doc_id, "data": data})
+            if coll == "verlauf":
+                verlauf[doc_id] = data
             else:
                 docs[f"{coll}/{doc_id}"] = data
     meta = docs["meta/abruf"]
     meta["via"] = "GitHub"
-    paket = {"ts": meta["ts"], "docs": docs, "hist": hist}
+    paket = {"ts": meta["ts"], "docs": docs, "verlauf": verlauf, "hist": []}
     (ziel / "artefakt.json").write_text(json.dumps(paket, ensure_ascii=False, separators=(",", ":")), "utf-8")
-    print(f"artefakt.json: {len(docs)} Dokumente, {meta['items']} Waren, {len(hist)} Verlaufspunkte, "
+    print(f"artefakt.json: {len(docs)} Dokumente, {meta['items']} Waren, {meta['neu']} Verlaufspunkte in {len(verlauf)} Docs, "
           f"{(ziel / 'artefakt.json').stat().st_size // 1024} KB, Stand {meta['ts']}")
 
 

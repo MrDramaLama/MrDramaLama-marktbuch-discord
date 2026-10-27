@@ -1,21 +1,24 @@
 """Holt Preise vom Albion Online Data Project (Europa) und baut Schreibpakete fürs Marktbuch.
 
 Aufruf (im Projektordner):
-  python -I marktbuch_abruf.py <dump-ordner> <ausgabe-ordner> [versionen]
+  python -I marktbuch_abruf.py <dump-ordner> <ausgabe-ordner> [versionen] [seit]
 
-<dump-ordner> enthält obs/*.json (Dump der Sammlung obs, nur die Doc-IDs zählen).
-[versionen]   z. B. "markt/ly=2,markt/fs=2,meta/abruf=5" (aktuelle Versionen bestehender Docs).
-[seit]        ISO-Zeit des letzten Abrufs (meta/abruf.ts); Verlauf nur für neuere Datenpunkte,
-              ohne Angabe die letzten 3 Stunden.
+<dump-ordner> wird seit Datenschema 2 nicht mehr gebraucht (bleibt für alte Aufrufe erhalten, darf leer sein).
+[versionen]   z. B. "markt/ly=2,meta/abruf=5,verlauf/CLOTH~20261027=3" (aktuelle Versionen bestehender Docs;
+              die verlauf-Versionen per ArtifactData query collection "verlauf", where tag >= erster Tag).
+[seit]        ISO-Zeit des letzten Abrufs (meta/abruf.ts); Verlauf ab 3 Stunden davor (Überlappung fängt
+              verspätet gemeldete Preise ein), ohne Angabe die letzten 3 Stunden.
 
-Schreibt:
-  markt/<stadt>  jüngster Preis je Ware einer Stadt, als Map items[ware] = {p, pt, b, bt}
-  meta/abruf     Zeitpunkt und Zählung des Abrufs
-  obs/<id>       Verlauf, nur Datenpunkte, die es noch nicht gibt (dp-<stadt>-<YYYYMMDDHHMM>-<ware>)
+Schreibt (Datenschema 2, steht in meta/abruf.schema):
+  markt/<stadt>          jüngster Preis je Ware einer Stadt, als Map items[ware] = {p, pt, b, bt}
+  meta/abruf             Zeitpunkt und Zählung des Abrufs
+  verlauf/<GRUPPE>~<JJJJMMTT>  Verlauf je Warengruppe und Tag (UTC): {v: 1, gruppe, tag, p: {ware: {stadt:
+                         {"HHMM" (UTC): [verkauf, kauf]}}}}, 0 = kein Preis. Bestehende Docs per "update"
+                         (fügt verschachtelt hinzu), neue per "set". Derselbe Punkt darf mehrfach geschrieben werden.
 Gibt ArtifactData-batch-Listen (je höchstens 50 Schreibvorgänge) mit file_path aus.
 Die Warenliste ist dieselbe wie im Marktbuch: 10 Rohstoff- und Veredelungsgruppen T2-T8, Verzauberung bis .3,
 dazu alle Kategorien aus marktbuch_waren.json (neben diesem Skript), seit 2026-10-20 auch die 21 Luxuswaren (lux; ihr siebtes Feld {reise, stadt, fest} ist nur für die Seite). Ressourcen liegen in markt/<stadt>,
-jede andere Hauptkategorie in markt/<stadt>-<kategorie>. Verlauf (obs) nur für die 10 Gruppen und die Avalonischen Splitter.
+jede andere Hauptkategorie in markt/<stadt>-<kategorie>. Verlauf nur für die 10 Gruppen und die Avalonischen Splitter (SHARD).
 """
 import gzip, json, sys, time, urllib.error, urllib.request, urllib.parse
 from datetime import datetime, timezone, timedelta
@@ -26,7 +29,8 @@ RAW = ["FIBER", "HIDE", "WOOD", "ORE", "ROCK"]
 REFINED = ["CLOTH", "LEATHER", "PLANKS", "METALBAR", "STONEBLOCK"]
 MAX_AGE = timedelta(days=7)
 API = "https://europe.albion-online-data.com/api/v2/stats/prices/"
-MAX_URL = 7900  # Datenprojekt nimmt bis etwa 8.000 Zeichen an (9.000 ergibt HTTP 414)
+MAX_URL = 4000  # api-docs des Datenprojekts: Adresse unter 4.096 Zeichen halten
+SCHEMA = 2      # 2 = Verlauf gebündelt in verlauf/<GRUPPE>~<JJJJMMTT> (vorher obs, ein Doc je Punkt)
 
 
 MAINS = {  # Unterkategorie -> Hauptkategorie, wie MAINS im Marktbuch
@@ -80,9 +84,10 @@ def chunks(ids):
 def fetch(url):
     """Eine Anfrage mit kurzer Pause davor. Bei 429 (zu viele Anfragen), Serverfehlern (5xx),
     Netzfehlern oder unlesbarer Antwort warten und wiederholen, höchstens 6 Versuche.
-    Mit gzip erlaubt das Datenprojekt etwa 180 Anfragen je Minute, ohne Kompression nur 6."""
+    Laut api-docs erlaubt das Datenprojekt mit gzip 100 Anfragen je Minute und 300 je 5 Minuten,
+    ohne Kompression nur 1 je 5 Minuten; 0,7 s Pause hält uns sicher unter 100 je Minute."""
     for attempt in range(6):
-        time.sleep(0.5)
+        time.sleep(0.7)
         req = urllib.request.Request(url, headers={"Accept-Encoding": "gzip", "User-Agent": "Marktbuch"})
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
@@ -122,7 +127,6 @@ def iso(d):
 
 def main(dump_dir, out_dir, versions_arg="", seit=""):
     versions = dict(v.split("=", 1) for v in versions_arg.split(",") if "=" in v)
-    existing = {p.stem for p in Path(dump_dir, "obs").glob("*.json")}
     wares = items()
     urls = list(chunks(list(wares)))
     rows = []
@@ -135,10 +139,11 @@ def main(dump_dir, out_dir, versions_arg="", seit=""):
         since = datetime.fromisoformat(seit)
         if since.tzinfo is None:
             since = since.astimezone()
+        since -= timedelta(hours=3)
     else:
         since = now - timedelta(hours=3)
     docs = {key if m == "res" else f"{key}-{m}": (city, {}) for city, key in CITIES.items() for m in MAINS}
-    hist = []
+    verlauf, neu = {}, 0
     for row in rows:
         city = row["city"]
         if city not in CITIES or row["item_id"] not in wares:
@@ -155,19 +160,21 @@ def main(dump_dir, out_dir, versions_arg="", seit=""):
         if not stamps:
             continue
         docs[CITIES[city] if main == "res" else f"{CITIES[city]}-{main}"][1][row["item_id"]] = e
-        ts = max(stamps).astimezone()
-        doc_id = f"dp-{CITIES[city]}-{ts:%Y%m%d%H%M}-{row['item_id']}"
-        if not with_hist or doc_id in existing or ts <= since:
+        ts = max(stamps)  # UTC
+        if not with_hist or ts <= since:
             continue
-        doc.update(item=row["item_id"], city=city, ts=iso(ts), src="Datenprojekt", note="")
-        hist.append(("obs", doc_id, doc))
+        gruppe = "SHARD" if row["item_id"].endswith("_SHARD_AVALONIAN") else row["item_id"].split("_")[1]
+        v = verlauf.setdefault(f"{gruppe}~{ts:%Y%m%d}", {"v": 1, "gruppe": gruppe, "tag": f"{ts:%Y%m%d}", "p": {}})
+        v["p"].setdefault(row["item_id"], {}).setdefault(CITIES[city], {})[f"{ts:%H%M}"] = [doc.get("price", 0), doc.get("buy", 0)]
+        neu += 1
 
+    # Reihenfolge: Preise, Verlauf, meta/abruf zuletzt (bricht ein Lauf ab, bleibt meta alt und der nächste holt nach)
     writes = []
     for doc_id, (city, its) in docs.items():
         writes.append(("markt", doc_id, {"city": city, "updated": iso(now), "items": its}))
+    writes += [("verlauf", doc_id, data) for doc_id, data in sorted(verlauf.items())]
     writes.append(("meta", "abruf", {"ts": iso(now), "via": "Claude", "items": sum(len(d[1]) for d in docs.values()),
-                                       "neu": len(hist)}))
-    writes += hist
+                                       "neu": neu, "schema": SCHEMA}))
 
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
     for old in out.glob("*.json"):
@@ -176,14 +183,18 @@ def main(dump_dir, out_dir, versions_arg="", seit=""):
     for coll, doc_id, data in writes:
         f = out / f"{coll}__{doc_id}.json"
         f.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        ref = {"op": "set", "collection": coll, "doc_id": doc_id, "file_path": str(f).replace("\\", "/")}
-        if f"{coll}/{doc_id}" in versions:
+        known = f"{coll}/{doc_id}" in versions
+        # Bestehender Verlauf wird ergänzt (update fügt verschachtelt hinzu), alles andere komplett ersetzt
+        ref = {"op": "update" if coll == "verlauf" and known else "set", "collection": coll, "doc_id": doc_id,
+               "file_path": str(f).replace("\\", "/")}
+        if known:
             ref["if_version"] = int(versions[f"{coll}/{doc_id}"])
         refs.append(ref)
     for i in range(0, len(refs), 50):
         print(json.dumps(refs[i:i + 50], separators=(",", ":")))
         print("=====")
-    print(f"{len(rows)} Zeilen vom Datenprojekt, {len(hist)} neue Verlaufspunkte, {-(-len(refs) // 50)} Pakete")
+    print(f"{len(rows)} Zeilen vom Datenprojekt, {neu} Verlaufspunkte in {len(verlauf)} Verlaufs-Docs "
+          f"(Tage {', '.join(sorted({d['tag'] for d in verlauf.values()})) or '-'}), {-(-len(refs) // 50)} Pakete")
     for city in CITIES:
         vals = [v for c, its in docs.values() if c == city for v in its.values()]
         ts = [v.get("pt") or v.get("bt") for v in vals]
