@@ -142,7 +142,9 @@ def main(dump_dir, out_dir, versions_arg="", seit=""):
             since = since.astimezone()
         since -= timedelta(hours=3)
     else:
-        since = now - timedelta(hours=3)
+        # Ohne Angabe (GitHub-Datenpaket) 12 Stunden zurück: fällt ein Lauf aus, holt der nächste die Punkte nach;
+        # doppelt geschriebene Punkte sind unschädlich
+        since = now - timedelta(hours=12)
     docs = {key if m == "res" else f"{key}-{m}": (city, {}) for city, key in CITIES.items() for m in MAINS}
     verlauf, neu = {}, 0
     for row in rows:
@@ -161,19 +163,23 @@ def main(dump_dir, out_dir, versions_arg="", seit=""):
         if not stamps:
             continue
         docs[CITIES[city] if main == "res" else f"{CITIES[city]}-{main}"][1][row["item_id"]] = e
-        ts = max(stamps)  # UTC
-        if not with_hist or ts <= since:
+        if not with_hist:
             continue
         gruppe = "SHARD" if row["item_id"].endswith("_SHARD_AVALONIAN") else row["item_id"].split("_")[1]
-        v = verlauf.setdefault(f"{gruppe}~{ts:%Y%m%d}", {"v": 2, "gruppe": gruppe, "tag": f"{ts:%Y%m%d}", "s": {}, "b": {}})
-        for feld, wert in (("s", doc.get("price")), ("b", doc.get("buy"))):
-            if wert:  # nur vorhandene Werte: ein späterer Lauf ohne Kauforder überschreibt so keine alte
-                v[feld].setdefault(row["item_id"], {}).setdefault(CITIES[city], {})[f"{ts:%H%M}"] = wert
-        neu += 1
+        # Verkauf und Kauf je mit ihrem eigenen Zeitpunkt (UTC); nur vorhandene Werte, so überschreibt ein
+        # späterer Lauf ohne Kauforder keinen alten Wert
+        for feld, wert, ts in (("s", doc.get("price"), sd), ("b", doc.get("buy"), bd)):
+            if not wert or ts <= since:
+                continue
+            v = verlauf.setdefault(f"{gruppe}~{ts:%Y%m%d}", {"v": 2, "gruppe": gruppe, "tag": f"{ts:%Y%m%d}", "s": {}, "b": {}})
+            v[feld].setdefault(row["item_id"], {}).setdefault(CITIES[city], {})[f"{ts:%H%M}"] = wert
+            neu += 1
 
     # Reihenfolge: Preise, Verlauf, meta/abruf zuletzt (bricht ein Lauf ab, bleibt meta alt und der nächste holt nach)
     writes = []
     for doc_id, (city, its) in docs.items():
+        if not its:  # leerer Teil (z. B. keine Antwort für eine Kategorie): gespeicherte Preise nicht löschen
+            continue
         writes.append(("markt", doc_id, {"city": city, "updated": iso(now), "items": its}))
     writes += [("verlauf", doc_id, data) for doc_id, data in sorted(verlauf.items())]
     writes.append(("meta", "abruf", {"ts": iso(now), "via": "Claude", "items": sum(len(d[1]) for d in docs.values()),
