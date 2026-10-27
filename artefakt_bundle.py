@@ -44,7 +44,7 @@ def main(ziel):
             coll, _, doc_id = f.stem.partition("__")
             data = json.loads(f.read_text("utf-8"))
             if coll == "verlauf":
-                verlauf[doc_id] = data
+                verlauf[f"{data['gruppe']}~{data['tag']}"] = data  # Dateiname trägt "_" statt "~"
             else:
                 docs[f"{coll}/{doc_id}"] = data
     meta = docs["meta/abruf"]

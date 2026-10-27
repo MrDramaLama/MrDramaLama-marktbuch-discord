@@ -181,7 +181,8 @@ def main(dump_dir, out_dir, versions_arg="", seit=""):
         old.unlink()
     refs = []
     for coll, doc_id, data in writes:
-        f = out / f"{coll}__{doc_id}.json"
+        # Kein "~" im Dateinamen: unbeaufsichtigte Läufe (Cloud-Routine) lehnen solche Quelldateien ab
+        f = out / f"{coll}__{doc_id.replace('~', '_')}.json"
         f.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         known = f"{coll}/{doc_id}" in versions
         # Bestehender Verlauf wird ergänzt (update fügt verschachtelt hinzu), alles andere komplett ersetzt
