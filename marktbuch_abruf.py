@@ -194,8 +194,9 @@ def main(dump_dir, out_dir, versions_arg="", seit=""):
         f = out / f"{coll}__{doc_id.replace('~', '_')}.json"
         f.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         known = f"{coll}/{doc_id}" in versions
-        # Bestehender Verlauf wird ergänzt (update fügt verschachtelt hinzu), alles andere komplett ersetzt
-        ref = {"op": "update" if coll == "verlauf" and known else "set", "collection": coll, "doc_id": doc_id,
+        # markt und verlauf werden ergänzt (update führt verschachtelt zusammen): eine Ware ohne neue Meldung behält
+        # ihren letzten Preis samt Zeitstempel; meta wird ersetzt
+        ref = {"op": "update" if coll in ("markt", "verlauf") and known else "set", "collection": coll, "doc_id": doc_id,
                "file_path": str(f).replace("\\", "/")}
         if known:
             ref["if_version"] = int(versions[f"{coll}/{doc_id}"])
