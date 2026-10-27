@@ -12,9 +12,10 @@ Aufruf (im Projektordner):
 Schreibt (Datenschema 2, steht in meta/abruf.schema):
   markt/<stadt>          jüngster Preis je Ware einer Stadt, als Map items[ware] = {p, pt, b, bt}
   meta/abruf             Zeitpunkt und Zählung des Abrufs
-  verlauf/<GRUPPE>~<JJJJMMTT>  Verlauf je Warengruppe und Tag (UTC): {v: 1, gruppe, tag, p: {ware: {stadt:
-                         {"HHMM" (UTC): [verkauf, kauf]}}}}, 0 = kein Preis. Bestehende Docs per "update"
+  verlauf/<GRUPPE>~<JJJJMMTT>  Verlauf je Warengruppe und Tag (UTC): {v: 2, gruppe, tag, s: {ware: {stadt:
+                         {"HHMM" (UTC): verkauf}}}, b: {… kauf}}, nur vorhandene Werte. Bestehende Docs per "update"
                          (fügt verschachtelt hinzu), neue per "set". Derselbe Punkt darf mehrfach geschrieben werden.
+                         (Die ersten Docs vom 24.–27.10.2026 tragen zusätzlich p: {…: [verkauf, kauf]}, Schema v 1.)
 Gibt ArtifactData-batch-Listen (je höchstens 50 Schreibvorgänge) mit file_path aus.
 Die Warenliste ist dieselbe wie im Marktbuch: 10 Rohstoff- und Veredelungsgruppen T2-T8, Verzauberung bis .3,
 dazu alle Kategorien aus marktbuch_waren.json (neben diesem Skript), seit 2026-10-20 auch die 21 Luxuswaren (lux; ihr siebtes Feld {reise, stadt, fest} ist nur für die Seite). Ressourcen liegen in markt/<stadt>,
@@ -164,8 +165,10 @@ def main(dump_dir, out_dir, versions_arg="", seit=""):
         if not with_hist or ts <= since:
             continue
         gruppe = "SHARD" if row["item_id"].endswith("_SHARD_AVALONIAN") else row["item_id"].split("_")[1]
-        v = verlauf.setdefault(f"{gruppe}~{ts:%Y%m%d}", {"v": 1, "gruppe": gruppe, "tag": f"{ts:%Y%m%d}", "p": {}})
-        v["p"].setdefault(row["item_id"], {}).setdefault(CITIES[city], {})[f"{ts:%H%M}"] = [doc.get("price", 0), doc.get("buy", 0)]
+        v = verlauf.setdefault(f"{gruppe}~{ts:%Y%m%d}", {"v": 2, "gruppe": gruppe, "tag": f"{ts:%Y%m%d}", "s": {}, "b": {}})
+        for feld, wert in (("s", doc.get("price")), ("b", doc.get("buy"))):
+            if wert:  # nur vorhandene Werte: ein späterer Lauf ohne Kauforder überschreibt so keine alte
+                v[feld].setdefault(row["item_id"], {}).setdefault(CITIES[city], {})[f"{ts:%H%M}"] = wert
         neu += 1
 
     # Reihenfolge: Preise, Verlauf, meta/abruf zuletzt (bricht ein Lauf ab, bleibt meta alt und der nächste holt nach)
